@@ -4,14 +4,35 @@ from sqlalchemy import select
 from program.scrapers import Scraping
 from program.db.db_functions import get_item_by_imdb_id
 from program.indexers.trakt import TraktIndexer
-from program.media.item import MediaItem
+from program.media.item import MediaItem, Show
 from program.downloaders.realdebrid import get_torrents
 from program.db.db import db
+from program.media.state import States
 
 router = APIRouter(
     prefix="/scrape",
     tags=["scrape"]
 )
+
+@router.get(
+    "/index/{imdb_id}",
+    summary="Index Media Item",
+    description="Index media item based on IMDb ID. Doesn't add to database."
+)
+async def index(request: Request, imdb_id: str):
+    if (services := request.app.program.services):
+        indexer = services[TraktIndexer]
+    else:
+        raise HTTPException(status_code=412, detail="Indexing services not initialized")
+    indexed_item = MediaItem({"imdb_id": imdb_id})
+    media_item: MediaItem = next(indexer.run(indexed_item))
+    if not media_item:
+        raise HTTPException(status_code=204, detail="Media item not found")
+
+    if media_item.type == "show":
+        media_item = Show(media_item)
+
+    return {"success": True, "data": media_item.to_extended_dict()}
 
 
 @router.get(
@@ -19,7 +40,7 @@ router = APIRouter(
     summary="Scrape Media Item",
     description="Scrape media item based on IMDb ID."
 )
-async def scrape(request: Request, imdb_id: str, season: int = None, episode: int = None):
+async def scrape(request: Request, imdb_id: str, season: int = None, episode: int = None, add_item: bool = True):
     """
     Scrape media item based on IMDb ID.
 
@@ -45,7 +66,8 @@ async def scrape(request: Request, imdb_id: str, season: int = None, episode: in
                 if not media_item:
                     raise HTTPException(status_code=204, detail="Media item not found")
                 session.add(media_item)
-                session.commit()
+                if add_item:
+                    session.commit()
             session.refresh(media_item)
 
             if media_item.type == "show":
