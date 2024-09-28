@@ -68,7 +68,9 @@ async def scrape(request: Request, imdb_id: str, season: int = None, episode: in
                 session.add(media_item)
                 if add_item:
                     session.commit()
-            session.refresh(media_item)
+
+            if add_item:
+                session.refresh(media_item)
 
             if media_item.type == "show":
                 if season and episode:
