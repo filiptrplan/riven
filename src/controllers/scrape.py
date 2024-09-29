@@ -15,7 +15,7 @@ router = APIRouter(
 )
 
 @router.get(
-    "/index/{imdb_id}",
+    "/index",
     summary="Index Media Item",
     description="Index media item based on IMDb ID. Doesn't add to database."
 )
@@ -28,10 +28,10 @@ async def index(request: Request, imdb_id: str):
     media_item: MediaItem = next(indexer.run(indexed_item))
     if not media_item:
         raise HTTPException(status_code=204, detail="Media item not found")
-
+    
     if media_item.type == "show":
         media_item = Show(media_item)
-
+    
     return {"success": True, "data": media_item.to_extended_dict()}
 
 

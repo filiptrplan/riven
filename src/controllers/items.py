@@ -27,6 +27,7 @@ from program.settings.manager import settings_manager
 from program.media.stream import Stream
 from program.scrapers.shared import rtn
 from program.types import Event
+from program.indexers.trakt import TraktIndexer
 from utils.logger import logger
 
 router = APIRouter(
@@ -140,6 +141,56 @@ async def get_items(
             "total_pages": total_pages,
         }
 
+
+@router.post(
+        "/index",
+        summary="Add and index Media Items",
+        description="Add media items with bases on imdb IDs and index them. Doesn't add to queue",
+)
+async def index_items(
+    request: Request, imdb_ids: str = None
+):
+        if (services := request.app.program.services):
+            indexer = services[TraktIndexer]
+        else:
+            raise HTTPException(status_code=412, detail="Indexing services not initialized")
+
+        if not imdb_ids:
+            raise HTTPException(status_code=400, detail="No IMDb ID(s) provided")
+    
+        ids = imdb_ids.split(",")
+    
+        valid_ids = []
+        for id in ids:
+            if not id.startswith("tt"):
+                logger.warning(f"Invalid IMDb ID {id}, skipping")
+            else:
+                valid_ids.append(id)
+    
+        if not valid_ids:
+            raise HTTPException(status_code=400, detail="No valid IMDb ID(s) provided")
+
+        items: list[MediaItem]= []
+        with db.Session() as session:
+            for id in valid_ids:
+                existing_item = session.execute(select(MediaItem).where(MediaItem.imdb_id == id)).unique().scalar_one_or_none()
+                if existing_item:
+                    logger.debug(f"Item with IMDb ID {id} already exists, skipping")
+                    continue
+                indexed_item = MediaItem({"imdb_id": id})
+                media_item: MediaItem = next(indexer.run(indexed_item))
+                if not media_item:
+                    session.rollback()
+                    raise HTTPException(status_code=204, detail=f"Media item {id} not found")
+                media_item.last_state = States.Indexed
+                logger.debug(f"Indexed item with IMDb ID {id}")
+                session.add(media_item)
+                items.append(media_item)
+            session.commit()
+            for item in items:
+                session.refresh(item)
+    
+        return {"success": True, "message": f"Indexed {len(items)} item(s)", "items": [item.to_dict() for item in items]}
 
 @router.post(
         "/add",
